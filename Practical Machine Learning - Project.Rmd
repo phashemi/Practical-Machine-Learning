@@ -1,0 +1,140 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Paymon Hashemi"
+date: "Saturday, March 19, 2016"
+output: html_document
+---
+
+**Introduction**
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit, it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of six (6) participants to predict the manner in which they did the exercise.
+
+The training and test data sets came from the following source:
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
+Read more: http://groupware.les.inf.puc-rio.br/har#sbia_paper_section#ixzz43NCRdV9T
+
+**Data Preprocessing**
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(e1071)
+library(gbm)
+```
+
+*Download the Data*
+We will download the training and testing files.  
+Note: We will only alter the training file.
+```{r}
+TrainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+TrainFile <- "C:/Users/PAYMON/data/pml-training.csv"
+TestFile  <- "C:/Users/PAYMON/data/pml-testing.csv"
+if (!file.exists("C:/Users/PAYMON/data")) {
+  dir.create("C:/Users/PAYMON/data")
+}
+if (!file.exists(TrainFile)) {
+  download.file(TrainUrl, destfile=TrainFile, method="curl")
+}
+if (!file.exists(TestFile)) {
+  download.file(TestUrl, destfile=TestFile, method="curl")
+}
+```
+
+*Read the training and test data sets*
+After downloading the two data sets, we can read the two csv files into two data frames.
+```{r}
+TrainFull <- read.csv("C:/Users/PAYMON/data/pml-training.csv")
+TestFull <- read.csv("C:/Users/PAYMON/data/pml-testing.csv")
+```
+
+*Splitting the data*
+The testing file contains 20 observations of 160 varibles. The training file contains 19622 observations of 160 variables. In order to clean the data, we will split the training data set (TrainFull) into a pure training data set (60% -- Train1) and a validation data set (40% -- Train2). We will use the validation data set to conduct a cross validation.
+```{r}
+set.seed(10928)
+inTrain <- createDataPartition(y=TrainFull$classe, p=0.6, list=F)
+Train1 <- TrainFull[inTrain, ]
+Train2 <- TrainFull[-inTrain, ]
+```
+
+We are now going to reduce the number of features by removing variables with nearly zero variance, variables that are almost always NA, and variables that not pertinent to prediction. 
+
+**Data Cleaning**
+# Remove variables that are NA
+```{r}
+varNA <- sapply(Train1, function(x) mean(is.na(x))) > 0.95
+Train1 <- Train1[, varNA==F]
+Train2 <- Train2[, varNA==F]
+```
+
+This action removed 67 variables (93 remaining).
+
+# Remove variables with near zero variance
+```{r}
+nzv <- nearZeroVar(Train1)
+Train1 <- Train1[, -nzv]
+Train2 <- Train2[, -nzv]
+```
+
+This action removed 34 variables (59 remaining).
+
+# Remove identification only variables (columns 1 to 5)
+```{r}
+Train1 <- Train1[, -(1:5)]
+Train2  <- Train2[, -(1:5)]
+```
+
+This action removed 5 variables (54 remaining). The validation data set (Train2) contains 7846 observations from 59 variables. The "classe" variable is in the validation data set (Train2).
+
+**Data Modeling using Train2**
+We will fit a predictive model for activity recognition using the Random Forest and GBM algorithms because they are the most accurate (using the most accurate one). We will use 5-fold cross validation when applying the algorithms.
+
+*Model fitting for Random Forest*
+```{r}
+set.seed(10928)
+ControlRf <- trainControl(method="cv", number=5, verboseIter=FALSE)
+modelRf <- train(classe ~ ., data=Train1, method="rf", trControl=ControlRf)
+modelRf$finalModel
+```
+
+Then, we will estimate the performance of the model on the validation data set followed by a plot of the error rate. We will repeat the same process for the GBM method.
+
+```{r}
+predictRf <- predict(modelRf, newdata=Train2)
+confusionMatrixRf <- confusionMatrix(predictRf, Train2$classe)
+confusionMatrixRf
+```
+
+```{r}
+plot(modelRf,main="Random Forest: Error Rate vs Number of Trees")
+```
+
+*Model fitting for GBM*
+```{r}
+set.seed(10928)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modelGBM  <- train(classe ~ ., data=Train1, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modelGBM$finalModel
+```
+
+```{r}
+predictGBM <- predict(modelGBM, newdata=Train2)
+confusionMatrixGBM <- confusionMatrix(predictGBM, Train2$classe)
+confusionMatrixGBM
+```
+
+```{r}
+plot(modelGBM,main="GBM: Error Rate vs Number of Trees")
+```
+
+Upon review of the plots showing the error rates for Random Forest and GBM, the latter clearly demonstrates a stronger rate (i.e. closer to accuracy of 1); therefore, we will apply Random Forest to the Test data set
+
+**Application of Random Forest to Test Data Set**
+
+Now, we apply the model to the original testing data set.
+```{r}
+TestFullPredict <- predict(modelRf, newdata=TestFull)
+TestFullPredict
+```
